@@ -13,7 +13,7 @@ import google from "./images/google-favicon.ico";
 let id = 0;
 function App() {
   const [tabs, setTabs] = useState<TabProperties[]>([
-    { id: "abc", favicon: fb, title: "测试", active: true },
+    { id: "abc", favicon: fb, title: "测试", active: true, isPinned: false },
   ]);
 
   const [darkMode, setDarkMode] = useState(false);
@@ -26,6 +26,8 @@ function App() {
         id: `tab-id-${id}`,
         title: `New Tabs ${id}`,
         favicon: tabs.length % 2 ? fb : google,
+        isPinned: true,
+        removeClose: true,
       },
     ]);
   };
@@ -64,7 +66,7 @@ function App() {
   const closeAll = () => setTabs([]);
 
   const toggleDarkMode = () => {
-    setDarkMode(darkMode => !darkMode)
+    setDarkMode((darkMode) => !darkMode);
   };
 
   return (

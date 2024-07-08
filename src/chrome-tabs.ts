@@ -55,6 +55,8 @@ export interface TabProperties {
   active?: boolean;
   favicon?: boolean | string;
   faviconClass?: string;
+  isPinned?: boolean;
+  removeClose?: boolean;
 }
 
 let instanceId = 0;
@@ -67,7 +69,7 @@ class ChromeTabs {
   isDragging: any;
   draggabillyDragging: any;
   isMouseEnter: boolean = false;
-  mouseEnterLayoutResolve: null | (() => void) = null
+  mouseEnterLayoutResolve: null | (() => void) = null;
 
   constructor() {
     this.draggabillies = [];
@@ -111,27 +113,27 @@ class ChromeTabs {
     //     this.addTab();
     // });
 
-    this.el.addEventListener('mouseenter', () => {
+    this.el.addEventListener("mouseenter", () => {
       this.isMouseEnter = true;
     });
 
-    this.el.addEventListener('mouseleave', this.onMouseLeave);
+    this.el.addEventListener("mouseleave", this.onMouseLeave);
     // When the page visibility status changes, it is triggered immediately
-    document.addEventListener('visibilitychange', this.onMouseLeave);
+    document.addEventListener("visibilitychange", this.onMouseLeave);
 
     this.tabEls.forEach((tabEl) => this.setTabCloseEventListener(tabEl));
   }
   onResize = () => {
     this.cleanUpPreviouslyDraggedTabs();
     this.layoutTabs();
-  }
+  };
   onMouseLeave = () => {
     this.isMouseEnter = false;
     if (this.mouseEnterLayoutResolve) {
       this.mouseEnterLayoutResolve();
       this.mouseEnterLayoutResolve = null;
     }
-  }
+  };
 
   get tabEls() {
     return Array.prototype.slice.call(this.el.querySelectorAll(".chrome-tab"));
@@ -139,6 +141,46 @@ class ChromeTabs {
 
   get tabContentEl() {
     return this.el.querySelector(".chrome-tabs-content")!;
+  }
+
+  get tabPinnedContentEl() {
+    return this.el.querySelector(".chrome-tabs-pinned-content")!;
+  }
+
+  getTabContentWidths(tabEls: HTMLElement[], containerWidth: number) {
+    const numberOfTabs = tabEls.length;
+    const tabsCumulativeOverlappedWidth =
+      (numberOfTabs - 1) * TAB_CONTENT_OVERLAP_DISTANCE;
+    const targetWidth =
+      (containerWidth -
+        2 * TAB_CONTENT_MARGIN +
+        tabsCumulativeOverlappedWidth) /
+      numberOfTabs;
+    const clampedTargetWidth = Math.max(
+      TAB_CONTENT_MIN_WIDTH,
+      Math.min(TAB_CONTENT_MAX_WIDTH, targetWidth)
+    );
+    const flooredClampedTargetWidth = Math.floor(clampedTargetWidth);
+    const totalTabsWidthUsingTarget =
+      flooredClampedTargetWidth * numberOfTabs +
+      2 * TAB_CONTENT_MARGIN -
+      tabsCumulativeOverlappedWidth;
+    const totalExtraWidthDueToFlooring =
+      containerWidth - totalTabsWidthUsingTarget;
+
+    const widths = [];
+    let extraWidthRemaining = totalExtraWidthDueToFlooring;
+    for (let i = 0; i < numberOfTabs; i += 1) {
+      const extraWidth =
+        flooredClampedTargetWidth < TAB_CONTENT_MAX_WIDTH &&
+        extraWidthRemaining > 0
+          ? 1
+          : 0;
+      widths.push(flooredClampedTargetWidth + extraWidth);
+      if (extraWidthRemaining > 0) extraWidthRemaining -= 1;
+    }
+
+    return widths;
   }
 
   get tabContentWidths() {
@@ -179,6 +221,18 @@ class ChromeTabs {
     return widths;
   }
 
+  getTabContentPositions(tabWidths: number[]) {
+    const positions: number[] = [];
+    let position = TAB_CONTENT_MARGIN;
+    tabWidths.forEach((width, i) => {
+      const offset = i * TAB_CONTENT_OVERLAP_DISTANCE;
+      positions.push(position - offset);
+      position += width;
+    });
+
+    return positions;
+  }
+
   get tabContentPositions() {
     const positions: number[] = [];
     const tabContentWidths = this.tabContentWidths;
@@ -202,7 +256,7 @@ class ChromeTabs {
 
     return positions;
   }
-
+  /*
   layoutTabs() {
     const tabContentWidths = this.tabContentWidths;
     this.tabEls.forEach((tabEl, i) => {
@@ -231,6 +285,73 @@ class ChromeTabs {
     });
     this.styleEl.innerHTML = styleHTML;
   }
+  */
+  layoutTabs() {
+    const pinnedTabEls = Array.prototype.slice.call(
+      this.tabPinnedContentEl.querySelectorAll(".chrome-tab")
+    );
+    const regularTabEls = Array.prototype.slice.call(
+      this.tabContentEl.querySelectorAll(".chrome-tab")
+    );
+    // TODO: - Fix this hack
+    const pinnedTabWidths = this.getTabContentWidths(pinnedTabEls, 120);
+    const regularTabWidths = this.getTabContentWidths(
+      regularTabEls,
+      this.tabContentEl.clientWidth
+    );
+
+    const allTabEls = [...pinnedTabEls, ...regularTabEls];
+    const allTabWidths = [...pinnedTabWidths, ...regularTabWidths];
+
+    allTabEls.forEach((tabEl, i) => {
+      const contentWidth = allTabWidths[i];
+      const width = contentWidth + 2 * TAB_CONTENT_MARGIN;
+
+      tabEl.style.width = width + "px";
+      tabEl.removeAttribute("is-small");
+      tabEl.removeAttribute("is-smaller");
+      tabEl.removeAttribute("is-mini");
+
+      if (contentWidth < TAB_SIZE_SMALL) tabEl.setAttribute("is-small", "");
+      if (contentWidth < TAB_SIZE_SMALLER) tabEl.setAttribute("is-smaller", "");
+      if (contentWidth < TAB_SIZE_MINI) tabEl.setAttribute("is-mini", "");
+    });
+
+    let styleHTML = "";
+    const pinnedTabPositions = this.getTabContentPositions(pinnedTabWidths);
+    const regularTabPositions = this.getTabContentPositions(regularTabWidths);
+
+    pinnedTabPositions.forEach((position, i) => {
+      styleHTML += `
+            .chrome-tabs[data-chrome-tabs-instance-id="${
+              this.instanceId
+            }"] .chrome-tabs-pinned-content .chrome-tab:nth-child(${i + 1}) {
+              transform: translate3d(${position}px, 0, 0)
+            }
+          `;
+    });
+
+    regularTabPositions.forEach((position, i) => {
+      styleHTML += `
+            .chrome-tabs[data-chrome-tabs-instance-id="${
+              this.instanceId
+            }"] .chrome-tabs-content .chrome-tab:nth-child(${i + 1}) {
+              transform: translate3d(${position}px, 0, 0)
+            }
+          `;
+    });
+
+    this.styleEl.innerHTML = styleHTML;
+
+    // Update the width of the pinned tabs container
+    const totalPinnedWidth = pinnedTabWidths.reduce(
+      (acc, width) => acc + width,
+      0
+    );
+    (this.tabPinnedContentEl as HTMLElement).style.width = `${
+      totalPinnedWidth + 2 * TAB_CONTENT_MARGIN
+    }px`;
+  }
 
   createNewTabEl() {
     const div = document.createElement("div");
@@ -255,8 +376,18 @@ class ChromeTabs {
     }
 
     tabProperties = Object.assign({}, defaultTapProperties, tabProperties);
-    this.tabContentEl.appendChild(tabEl);
-    this.setTabCloseEventListener(tabEl);
+    if (tabProperties.isPinned) {
+      this.tabPinnedContentEl.appendChild(tabEl);
+    } else {
+      this.tabContentEl.appendChild(tabEl);
+    }
+    if (!tabProperties.removeClose) {
+      this.setTabCloseEventListener(tabEl);
+    } else {
+      tabEl.setAttribute("data-close-removed", "true");
+      tabEl.querySelector(".chrome-tab-close")?.remove();
+    }
+
     this.updateTab(tabEl, tabProperties);
     this.emit("tabAdd", { tabEl });
     if (!background) this.setCurrentTab(tabEl);
@@ -267,6 +398,7 @@ class ChromeTabs {
   }
 
   setTabCloseEventListener(tabEl: HTMLElement) {
+    if (tabEl.getAttribute("data-close-removed") === "true") return;
     tabEl.querySelector(".chrome-tab-close")!.addEventListener("click", (_) => {
       _.stopImmediatePropagation();
       // this.removeTab(tabEl);
@@ -305,7 +437,7 @@ class ChromeTabs {
       if (!this.mouseEnterLayoutResolve) {
         new Promise<void>((resolve) => {
           this.mouseEnterLayoutResolve = resolve;
-        }).then(() => this.layoutTabs())
+        }).then(() => this.layoutTabs());
       }
     } else {
       this.layoutTabs();
@@ -336,6 +468,9 @@ class ChromeTabs {
     if (tabProperties.id) {
       tabEl.setAttribute("data-tab-id", tabProperties.id);
     }
+    if (tabProperties.isPinned) {
+      tabEl.setAttribute("is-pinned", "true");
+    }
   }
 
   cleanUpPreviouslyDraggedTabs() {
@@ -365,11 +500,15 @@ class ChromeTabs {
     this.draggabillies.forEach((d) => d.destroy());
 
     tabEls.forEach((tabEl, originalIndex) => {
+      let isPinned = tabEl.getAttribute("is-pinned");
+      // if (isPinned) {
+      //   return;
+      // }
       const originalTabPositionX = tabPositions[originalIndex];
       const draggabilly = new Draggabilly(tabEl, {
         axis: "x",
         handle: ".chrome-tab-drag-handle",
-        containment: this.tabContentEl,
+        containment: isPinned ? this.tabPinnedContentEl : this.tabContentEl,
       });
 
       this.draggabillies.push(draggabilly);
@@ -451,8 +590,8 @@ class ChromeTabs {
   }
 
   destroy() {
-    window.removeEventListener('resize',this.onResize);
-    document.removeEventListener('visibilitychange', this.onMouseLeave)
+    window.removeEventListener("resize", this.onResize);
+    document.removeEventListener("visibilitychange", this.onMouseLeave);
   }
 }
 
